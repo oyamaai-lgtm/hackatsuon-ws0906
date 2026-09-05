@@ -374,26 +374,23 @@ function guessArea(lat,lon) {
     const places = json.places || [];
     if (places.length === 0) return;
 
-    // 認証店と重複しないよう名前で弾く（kankoデータには認証店も含まれる）
     const existingNames = new Set(allStores.map(s => s.name));
-    // より広めの一致：認証店名と部分一致するものも除外
-    const certifiedNamesList = [...certifiedNames];
 
     let added = 0;
     for (const p of places) {
       if (!p.lat || !p.lon) continue;
-      if (existingNames.has(p.name)) continue;
 
-      // 認証店との部分一致チェック（例: 「焼肉くりこ」と「気仙沼ホルモン発祥の店 焼肉くりこ」）
+      // 認証店との照合を最初に行う（完全一致 or 部分一致）
+      // ※ existingNames チェックより先に行わないと完全一致店が素通りしてしまう
       const matchedCertified = allStores.find(s =>
-        s.certified && (s.name.includes(p.name) || p.name.includes(s.name))
+        s.certified && (s.name === p.name || s.name.includes(p.name) || p.name.includes(s.name))
       );
       if (matchedCertified) {
-        // 観光サイトのURLを認証店エントリーに付与
         if (p.url) matchedCertified.kankoUrl = p.url;
         continue;
       }
 
+      if (existingNames.has(p.name)) continue;
       existingNames.add(p.name);
       const area   = guessArea(p.lat, p.lon);
       const marker = L.marker([p.lat, p.lon], { icon: ICONS.kanko });
