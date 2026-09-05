@@ -37,9 +37,14 @@
     }
     #filters {
       display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
+      flex-direction: column;
+      gap: 5px;
       font-size: 13px;
+    }
+    .filter-row {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
       align-items: center;
     }
     .filter-btn {
@@ -47,7 +52,7 @@
       color: #fff;
       border: 1px solid rgba(255,255,255,0.4);
       border-radius: 14px;
-      padding: 3px 11px;
+      padding: 3px 10px;
       cursor: pointer;
       font-size: 12px;
       transition: background 0.15s;
@@ -129,13 +134,25 @@
   </div>
   <input id="search" type="search" placeholder="店名で検索…" autocomplete="off">
   <div id="filters">
-    <span style="font-size:12px;opacity:0.8">表示:</span>
-    <button class="filter-btn active" data-filter="all">すべて</button>
-    <button class="filter-btn" data-filter="certified">子育て応援店のみ</button>
-    <span style="font-size:12px;opacity:0.8;margin-left:4px">エリア:</span>
-    <button class="filter-btn active" data-area="中央">中央</button>
-    <button class="filter-btn active" data-area="北">北</button>
-    <button class="filter-btn active" data-area="南">南</button>
+    <div class="filter-row">
+      <span style="font-size:12px;opacity:0.8">表示:</span>
+      <button class="filter-btn active" data-filter="all">すべて</button>
+      <button class="filter-btn" data-filter="certified">子育て応援店のみ</button>
+      <span style="font-size:12px;opacity:0.8;margin-left:4px">エリア:</span>
+      <button class="filter-btn active" data-area="中央">中央</button>
+      <button class="filter-btn active" data-area="北">北</button>
+      <button class="filter-btn active" data-area="南">南</button>
+    </div>
+    <div class="filter-row">
+      <span style="font-size:12px;opacity:0.8">カテゴリ:</span>
+      <button class="filter-btn active" data-cat="all">すべて</button>
+      <button class="filter-btn" data-cat="cafe">☕ カフェ・喫茶</button>
+      <button class="filter-btn" data-cat="sushi">🐟 寿司・海鮮</button>
+      <button class="filter-btn" data-cat="yakiniku">🥩 焼肉・肉料理</button>
+      <button class="filter-btn" data-cat="ramen">🍜 ラーメン・麺類</button>
+      <button class="filter-btn" data-cat="izakaya">🍶 居酒屋・バー</button>
+      <button class="filter-btn" data-cat="other">🍽 食堂・その他</button>
+    </div>
   </div>
 </div>
 
@@ -274,6 +291,25 @@ const certifiedNames = new Set(CERTIFIED.map(s=>s.name));
 function normName(n) { return n.replace(/[\s　]/g, '').toLowerCase(); }
 const seenNames = new Set(CERTIFIED.map(s => normName(s.name)));
 
+// キーワードベースのカテゴリ推定
+function guessCategory(name, amenity) {
+  const n = name;
+  if (/カフェ|cafe|コーヒー|coffee|喫茶|茶処|ベーカリー|baker|パン|brunch|lepo|家カフェ/i.test(n)
+      || amenity === 'cafe') return 'cafe';
+  if (/寿司|鮨|海鮮|まぐろ|北かつ|漁師|かつお|さんま|海産/i.test(n)) return 'sushi';
+  if (/焼肉|ホルモン|牛角|豚野郎|ステーキ|さうす|ジャンジャン|やまなか/i.test(n)) return 'yakiniku';
+  if (/ラーメン|らーめん|麺|うどん|そば|めん丸|パスタ/i.test(n)) return 'ramen';
+  if (/居酒屋|串カツ|串揚|重い槍|漁火|酒場|酒処|酒庵/i.test(n)
+      || amenity === 'bar' || amenity === 'pub') return 'izakaya';
+  return 'other';
+}
+
+const CAT_LABEL = {
+  cafe:'☕ カフェ・喫茶', sushi:'🐟 寿司・海鮮',
+  yakiniku:'🥩 焼肉・肉料理', ramen:'🍜 ラーメン・麺類',
+  izakaya:'🍶 居酒屋・バー', other:'🍽 食堂・その他',
+};
+
 function buildPopup(store) {
   return `
     <div class="popup-title">${store.name}</div>
@@ -294,7 +330,7 @@ for (const s of CERTIFIED) {
   const approx = s.lat === null;
   const iconKey = s.closed ? 'closed' : (approx ? 'approx' : 'certified');
   const marker = L.marker([lat,lon], { icon:ICONS[iconKey] });
-  const entry = { ...s, lat, lon, certified:true, approx, marker };
+  const entry = { ...s, lat, lon, certified:true, approx, marker, category:guessCategory(s.name,'') };
   marker.bindPopup(() => buildPopup(entry), { maxWidth:260 });
   allStores.push(entry);
 }
@@ -341,7 +377,7 @@ const osmIds = new Set();
 
       const amenity = el.tags.amenity || el.tags.shop || el.tags.tourism || '';
       const marker = L.marker([lat,lon], { icon:ICONS.osm });
-      const entry = { id:key, name, area:guessArea(lat,lon), lat, lon, certified:false, approx:false, closed:false, marker, amenity };
+      const entry = { id:key, name, area:guessArea(lat,lon), lat, lon, certified:false, approx:false, closed:false, marker, amenity, category:guessCategory(name,amenity) };
       marker.bindPopup(`
         <div class="popup-title">${name}</div>
         <div style="font-size:11px;color:#555;margin-top:4px">${amenityLabel(amenity)}</div>
@@ -414,6 +450,7 @@ function guessArea(lat,lon) {
         certified: false, approx: false, closed: false,
         marker, source: 'kanko',
         hours: p.hours, closedDay: p.closed, kankoUrl: p.url,
+        category: guessCategory(p.name, ''),
       });
       added++;
     }
@@ -429,12 +466,14 @@ function guessArea(lat,lon) {
 // =============================================================================
 let filterMode = 'all';
 let activeAreas = new Set(['中央','北','南']);
+let activeCat   = 'all';
 let searchText  = '';
 let activeItemId = null;
 
 function isVisible(s) {
   if (filterMode === 'certified' && !s.certified) return false;
   if (!activeAreas.has(s.area)) return false;
+  if (activeCat !== 'all' && s.category !== activeCat) return false;
   if (searchText && !s.name.toLowerCase().includes(searchText)) return false;
   return true;
 }
@@ -480,6 +519,7 @@ function renderAll() {
             : s.source === 'kanko'
               ? '<span class="badge" style="background:#e0f2f1;color:#00695c">🌐 観光サイト</span>'
               : '<span class="badge badge-osm">OSM</span>'}
+          <span class="badge" style="background:#f3e8ff;color:#6b21a8">${CAT_LABEL[s.category]||''}</span>
           <span class="badge" style="background:${ac}22;color:${ac}">${s.area}エリア</span>
           ${s.approx ? '<span class="badge badge-approx">推定位置</span>' : ''}
           ${s.closed ? '<span class="badge badge-closed">閉店</span>' : ''}
@@ -532,6 +572,15 @@ document.querySelectorAll('[data-area]').forEach(btn => {
     } else {
       activeAreas.add(area); btn.classList.add('active');
     }
+    renderAll();
+  });
+});
+
+document.querySelectorAll('[data-cat]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-cat]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeCat = btn.dataset.cat;
     renderAll();
   });
 });
