@@ -270,6 +270,10 @@ const ICONS = { certified:makeIcon('certified'), approx:makeIcon('approx'), clos
 const allStores = [];
 const certifiedNames = new Set(CERTIFIED.map(s=>s.name));
 
+// 全ローダー共通の重複排除セット（スペース除去・小文字で正規化）
+function normName(n) { return n.replace(/[\s　]/g, '').toLowerCase(); }
+const seenNames = new Set(CERTIFIED.map(s => normName(s.name)));
+
 function buildPopup(store) {
   return `
     <div class="popup-title">${store.name}</div>
@@ -325,7 +329,9 @@ const osmIds = new Set();
     for (const el of json.elements) {
       const name = el.tags?.name;
       if (!name) continue;
-      if (certifiedNames.has(name)) continue;
+      const norm = normName(name);
+      if (seenNames.has(norm)) continue;
+      seenNames.add(norm);
       const lat = el.type==='node' ? el.lat : el.center?.lat;
       const lon = el.type==='node' ? el.lon : el.center?.lon;
       if (!lat||!lon) continue;
@@ -374,14 +380,11 @@ function guessArea(lat,lon) {
     const places = json.places || [];
     if (places.length === 0) return;
 
-    const existingNames = new Set(allStores.map(s => s.name));
-
     let added = 0;
     for (const p of places) {
       if (!p.lat || !p.lon) continue;
 
       // 認証店との照合を最初に行う（完全一致 or 部分一致）
-      // ※ existingNames チェックより先に行わないと完全一致店が素通りしてしまう
       const matchedCertified = allStores.find(s =>
         s.certified && (s.name === p.name || s.name.includes(p.name) || p.name.includes(s.name))
       );
@@ -390,8 +393,9 @@ function guessArea(lat,lon) {
         continue;
       }
 
-      if (existingNames.has(p.name)) continue;
-      existingNames.add(p.name);
+      const norm = normName(p.name);
+      if (seenNames.has(norm)) continue;
+      seenNames.add(norm);
       const area   = guessArea(p.lat, p.lon);
       const marker = L.marker([p.lat, p.lon], { icon: ICONS.kanko });
 
