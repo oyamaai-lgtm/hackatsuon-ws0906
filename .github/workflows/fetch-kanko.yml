@@ -1,0 +1,172 @@
+name: 気仙沼観光サイトの飲食店情報を定期取得
+
+on:
+  schedule:
+    # 毎週月曜 JST 9:00 (UTC 00:00) に実行
+    - cron: '0 0 * * 1'
+  workflow_dispatch: # 手動実行も可
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-restaurants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 気仙沼観光サイトから飲食店情報をスクレイピング
+        run: |
+          node - << 'NODEEOF'
+          const https = require('https');
+          const fs    = require('fs');
+
+          // 気仙沼観光サイトの飲食店一覧から店舗URLを収集
+          const BASE = 'https://kesennuma-kanko.jp';
+          const LIST_URL = `${BASE}/eat/theme/`;
+
+          function fetchUrl(url) {
+            return new Promise((resolve, reject) => {
+              const opts = { headers: { 'User-Agent': 'Mozilla/5.0 kesennuma-restaurant-map (public data)' } };
+              const req = https.get(url, opts, (res) => {
+                if ([301,302].includes(res.statusCode)) return resolve(fetchUrl(res.headers.location));
+                let d = '';
+                res.on('data', c => d += c);
+                res.on('end', () => resolve(d));
+              });
+              req.on('error', reject);
+              req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+            });
+          }
+
+          function strip(s) {
+            return s.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+          }
+          function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+          async function getStoreUrls() {
+            const html = await fetchUrl(LIST_URL);
+            const matches = [...html.matchAll(/href="(https:\/\/kesennuma-kanko\.jp\/[^"\/]+\/)"/g)];
+            const urls = [...new Set(matches.map(m => m[1]))].filter(u =>
+              !u.includes('/eat/') && !u.includes('/stay/') && !u.includes('/see/') &&
+              !u.includes('/activity/') && !u.includes('/access/') && !u.includes('/about/') &&
+              !u.includes('/contact/') && !u.includes('/tag/') && !u.includes('/category/') &&
+              !u.match(/kesennuma-kanko\.jp\/$/)
+            );
+            return urls;
+          }
+
+          function parsePage(html, url) {
+            // 店名
+            const h1 = (html.match(/<h1[^>]*class="[^"]*entry[^"]*"[^>]*>([\s\S]*?)<\/h1>/) ||
+                         html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/) || [])[1] || '';
+            let name = strip(h1) || '';
+            if (!name) {
+              name = ((html.match(/<title>([^<]+)/) || [])[1] || '').split('|')[0].split('–')[0].trim();
+            }
+
+            // dl.cf から所在地・電話などを抽出
+            const fields = {};
+            const dlMatch = html.match(/<dl[^>]*class="cf"[^>]*>([\s\S]*?)<\/dl>/);
+            if (dlMatch) {
+              const pairs = [...dlMatch[1].matchAll(/<dt>([\s\S]*?)<\/dt>[\s\S]*?<dd>([\s\S]*?)<\/dd>/g)];
+              for (const [, dt, dd] of pairs) {
+                fields[strip(dt)] = strip(dd);
+              }
+            }
+
+            // Googleマップ埋め込みから座標取得
+            const iframeM = html.match(/class="eat-map"[^>]*>[\s\S]*?<iframe[^>]+src="([^"]+)"/);
+            let lat = null, lon = null;
+            if (iframeM) {
+              const latM = iframeM[1].match(/!3d(-?\d+\.?\d*)/);
+              const lonM = iframeM[1].match(/!2d(-?\d+\.?\d*)/);
+              if (latM) lat = parseFloat(latM[1]);
+              if (lonM) lon = parseFloat(lonM[1]);
+            }
+
+            return {
+              name: name.replace(/\s*[|｜\-–—].*/,'').trim(),
+              url,
+              address: fields['所在地'] || fields['住所'] || '',
+              phone:   fields['問合先'] || fields['電話'] || '',
+              hours:   fields['営業時間'] || '',
+              closed:  fields['定休日'] || fields['休業日'] || '',
+              lat, lon,
+            };
+          }
+
+          async function main() {
+            console.log('店舗URL一覧を取得中...');
+            const urls = await getStoreUrls();
+            console.log(`${urls.length}件のURLを発見`);
+
+            const places = [];
+            const seen = new Set();
+            for (const url of urls) {
+              if (seen.has(url)) continue;
+              seen.add(url);
+              await sleep(600);
+              try {
+                const html = await fetchUrl(url);
+                const p = parsePage(html, url);
+                if (!p.name) continue;
+                const id = url.replace(BASE + '/', '').replace(/\//g, '');
+                places.push({ id, ...p });
+                console.log(`✓ ${p.name}`);
+              } catch(e) {
+                console.error(`✗ ${url}: ${e.message}`);
+              }
+            }
+
+            // 認証店リスト（重複判定用）
+            const CERTIFIED_NAMES = new Set([
+              "R Baker 気仙沼店","アンカーコーヒー内湾店","アンカーコーヒーマザーポート店",
+              "いちば寿司","大阪王将 気仙沼店","小野家","割烹世界","鼎・斉吉",
+              "cafe エスポアール","季節料理 お食事処 浜の家","季節料理 大松",
+              "食い呑みの里 重い槍","串カツ田中 気仙沼店","くるくる喫茶うつみ",
+              "気仙沼あさひ鮨 本店","気仙沼 ゆう寿司","サンモリ館","昭栄庵",
+              "宅配弁当と食堂 たばご屋","CHEERS","中華家かいか","鶴亀の湯・鶴亀食堂",
+              "TEN(T)","唐や","豚野郎","福建楼","BRUNCH","bakery.cafe.lepo",
+              "北かつまぐろ屋 田中前店","ボルセッタイシカワ ライブキッチン",
+              "マクドナルド イオン気仙沼店","ミナトノトウヤ","宮登","焼肉くりこ",
+              "焼肉の店 さうす","焼肉ハウス ジャンジャン","焼肉冷麺やまなか家 気仙沼店",
+              "ラーメン炎","リアスキッチン","旅館 海光館","家カフェ『HATA』",
+              "おおがまテーブル","割烹 焼肉 海鮮ゆう","Kana Kana","CAFE&MUSIC 十字路",
+              "釜揚げうどん 団平","喫茶GIGI","牛角 気仙沼店","島の味処こまつ",
+              "食楽まるさん","茶処プランタン","TTbase 漁火","麺酒庵こまつ",
+              "らいむらいと","和食 きらず","かぶとむしSurf Shop","鮨処えんどう",
+              "花道","陽だまりレストラン","道の駅大谷海岸レストランumicoco",
+              "南三陸ドライブインひかど食堂","めん丸 気仙沼店","モーランド・本吉",
+            ]);
+
+            // 認証店フラグ付与（名前部分一致）
+            const certList = [...CERTIFIED_NAMES];
+            for (const p of places) {
+              p.certified = certList.some(cn => p.name.includes(cn) || cn.includes(p.name));
+            }
+
+            const out = {
+              updated: new Date().toISOString(),
+              source: 'https://kesennuma-kanko.jp/eat/theme/',
+              count: places.length,
+              places,
+            };
+            fs.writeFileSync('restaurants.json', JSON.stringify(out, null, 2));
+            console.log(`\n完了: ${places.length}件を保存しました`);
+          }
+          main().catch(e => { console.error(e); process.exit(1); });
+          NODEEOF
+
+      - name: 変更があればコミット & プッシュ
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add restaurants.json
+          if git diff --staged --quiet; then
+            echo "変更なし（スキップ）"
+          else
+            COUNT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('restaurants.json','utf8')).count)")
+            git commit -m "chore: 気仙沼観光サイトの飲食店データを更新 (${COUNT}件) [skip ci]"
+            git push
+          fi

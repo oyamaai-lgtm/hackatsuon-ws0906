@@ -1,76 +1,543 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hackatsuon Starter</title>
-<style>
-  :root {
-    --ink: #1b2a3a;      /* 三陸の夜の海 */
-    --paper: #f6f4ef;    /* 帆布 */
-    --accent: #c8451f;   /* 大漁旗の朱 */
-    --wave: #2e6f8e;     /* 昼の海 */
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
-    background: var(--paper);
-    color: var(--ink);
-    min-height: 100svh;
-    display: grid;
-    place-items: center;
-    padding: 2rem;
-  }
-  main { max-width: 34rem; text-align: center; }
-  .flag {
-    display: inline-block;
-    background: var(--accent);
-    color: var(--paper);
-    font-weight: 700;
-    letter-spacing: 0.35em;
-    padding: 0.4rem 1.2rem 0.4rem 1.55rem;
-    margin-bottom: 2rem;
-  }
-  h1 {
-    font-size: clamp(1.8rem, 6vw, 2.6rem);
-    line-height: 1.4;
-    margin-bottom: 1.2rem;
-  }
-  h1 em {
-    font-style: normal;
-    color: var(--wave);
-    border-bottom: 4px solid var(--accent);
-  }
-  p { line-height: 1.9; color: #445; }
-  .hint {
-    margin-top: 2.5rem;
-    font-size: 0.85rem;
-    text-align: left;
-    background: #fff;
-    border-left: 4px solid var(--wave);
-    padding: 1rem 1.2rem;
-  }
-  code {
-    background: var(--ink);
-    color: var(--paper);
-    padding: 0.15em 0.5em;
-    border-radius: 3px;
-    font-size: 0.9em;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>気仙沼 飲食店マップ</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', 'Noto Sans JP', sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      background: #f0f4f8;
+    }
+
+    /* ── ヘッダー ── */
+    #header {
+      background: #1c4c8a;
+      color: #fff;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      z-index: 100;
+    }
+    #header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.03em; }
+    #search {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: none;
+      font-size: 14px;
+      outline: none;
+    }
+    #filters {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      align-items: center;
+    }
+    .filter-btn {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.4);
+      border-radius: 14px;
+      padding: 3px 11px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .filter-btn.active { background: #fff; color: #1c4c8a; font-weight: 600; }
+
+    /* ── メインレイアウト ── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+    #sidebar {
+      width: 330px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-right: 1px solid #dce3ed;
+    }
+    #map { flex: 1; z-index: 0; }
+
+    /* ── 店舗リスト ── */
+    #list-header {
+      padding: 7px 14px;
+      font-size: 12px;
+      color: #667;
+      background: #f7f9fc;
+      border-bottom: 1px solid #dce3ed;
+      flex-shrink: 0;
+    }
+    #store-list { overflow-y: auto; flex: 1; }
+    .store-item {
+      display: flex;
+      align-items: flex-start;
+      padding: 10px 14px;
+      border-bottom: 1px solid #eef1f6;
+      cursor: pointer;
+      gap: 10px;
+      transition: background 0.12s;
+    }
+    .store-item:hover { background: #f0f5ff; }
+    .store-item.active { background: #e8f0ff; }
+    .store-icon-wrap { width: 32px; height: 32px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .store-info { flex: 1; min-width: 0; }
+    .store-name { font-size: 13px; font-weight: 600; color: #1a1a2e; line-height: 1.3; }
+    .store-name.closed { text-decoration: line-through; color: #999; }
+    .store-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+    .badge { font-size: 10px; border-radius: 10px; padding: 1px 7px; font-weight: 600; }
+    .badge-certified { background: #d4edda; color: #155724; }
+    .badge-approx    { background: #fff3cd; color: #856404; }
+    .badge-closed    { background: #f8d7da; color: #721c24; }
+    .badge-osm       { background: #e8e8e8; color: #555; }
+
+    /* ── ポップアップ ── */
+    .popup-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .popup-certified { display: inline-block; background: #d4edda; color: #155724; font-size: 11px; border-radius: 8px; padding: 1px 8px; margin-top: 2px; }
+    .popup-approx { font-size: 11px; color: #856404; margin-top: 4px; }
+
+    /* ── ローディング ── */
+    #loading-overlay {
+      position: fixed; bottom: 16px; right: 16px;
+      background: rgba(28,76,138,0.9); color: #fff;
+      padding: 8px 14px; border-radius: 8px; font-size: 12px;
+      z-index: 1000; display: none;
+    }
+
+    /* ── モバイル ── */
+    @media (max-width: 700px) {
+      #main { flex-direction: column; }
+      #sidebar { width: 100%; height: 42vh; border-right: none; border-top: 1px solid #dce3ed; order: 2; }
+      #map { height: 58vh; order: 1; }
+    }
+  </style>
 </head>
 <body>
-<main>
-  <span class="flag">出港準備完了</span>
-  <h1>このページが見えたら、<br><em>デプロイ成功</em>です</h1>
-  <p>
-    ここは、あなたのアプリの出発点。<br>
-    このページを、あなたの作りたいものに書き換えていきましょう。
-  </p>
-  <div class="hint">
-    Claude Code にこう伝えてみてください:<br>
-    <code>index.html を◯◯なアプリに書き換えて</code>
+
+<div id="header">
+  <div style="display:flex;align-items:center;gap:10px">
+    <h1>気仙沼 飲食店マップ</h1>
+    <span id="count-badge" style="font-size:11px;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:10px"></span>
   </div>
-</main>
+  <input id="search" type="search" placeholder="店名で検索…" autocomplete="off">
+  <div id="filters">
+    <span style="font-size:12px;opacity:0.8">表示:</span>
+    <button class="filter-btn active" data-filter="all">すべて</button>
+    <button class="filter-btn" data-filter="certified">子育て応援店のみ</button>
+    <span style="font-size:12px;opacity:0.8;margin-left:4px">エリア:</span>
+    <button class="filter-btn active" data-area="中央">中央</button>
+    <button class="filter-btn active" data-area="北">北</button>
+    <button class="filter-btn active" data-area="南">南</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div id="list-header">読み込み中...</div>
+    <div id="store-list"></div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<div id="loading-overlay">読み込み中...</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// =============================================================================
+// データ: けせんぬま子育て応援店 認証飲食店一覧
+// 出典: 気仙沼市 令和7年度認証店舗一覧 (2026年8月10日付)
+// lat/lon: Nominatimで事前ジオコード済み。nullはエリア中心からの推定位置。
+// =============================================================================
+const CERTIFIED = [
+  // ── 中央エリア（気仙沼・松岩・新月・面瀬） ──
+  {id:1,  name:"R Baker 気仙沼店",                    area:"中央", lat:null,        lon:null},
+  {id:2,  name:"アンカーコーヒー内湾店",               area:"中央", lat:38.9057622, lon:141.5747794},
+  {id:3,  name:"アンカーコーヒーマザーポート店",        area:"中央", lat:null,        lon:null},
+  {id:4,  name:"いちば寿司",                           area:"中央", lat:38.899982,  lon:141.5795056},
+  {id:5,  name:"大阪王将 気仙沼店",                    area:"中央", lat:null,        lon:null},
+  {id:6,  name:"小野家",                               area:"中央", lat:null,        lon:null},
+  {id:7,  name:"割烹世界",                             area:"中央", lat:38.9053475, lon:141.5730771},
+  {id:8,  name:"鼎・斉吉",                             area:"中央", lat:null,        lon:null},
+  {id:9,  name:"cafe エスポアール",                    area:"中央", lat:38.8945035, lon:141.5670099},
+  {id:10, name:"季節料理 お食事処 浜の家",              area:"中央", lat:null,        lon:null},
+  {id:11, name:"季節料理 大松",                        area:"中央", lat:null,        lon:null},
+  {id:12, name:"食い呑みの里 重い槍",                  area:"中央", lat:null,        lon:null},
+  {id:13, name:"串カツ田中 気仙沼店",                  area:"中央", lat:null,        lon:null},
+  {id:14, name:"くるくる喫茶うつみ",                   area:"中央", lat:null,        lon:null},
+  {id:15, name:"気仙沼あさひ鮨 本店",                 area:"中央", lat:null,        lon:null},
+  {id:16, name:"気仙沼 ゆう寿司",                     area:"中央", lat:38.8943014, lon:141.5692497},
+  {id:17, name:"サンモリ館",                           area:"中央", lat:null,        lon:null},
+  {id:18, name:"昭栄庵",                               area:"中央", lat:38.8897035, lon:141.5695737},
+  {id:19, name:"宅配弁当と食堂 たばご屋",              area:"中央", lat:null,        lon:null},
+  {id:20, name:"CHEERS",                               area:"中央", lat:38.8994335, lon:141.5805111},
+  {id:21, name:"中華家かいか",                         area:"中央", lat:null,        lon:null},
+  {id:22, name:"鶴亀の湯・鶴亀食堂",                  area:"中央", lat:null,        lon:null},
+  {id:23, name:"TEN(T)",                               area:"中央", lat:38.8992781, lon:141.5806831},
+  {id:24, name:"唐や",                                 area:"中央", lat:38.889292,  lon:141.5563803},
+  {id:25, name:"豚野郎",                               area:"中央", lat:null,        lon:null},
+  {id:26, name:"福建楼",                               area:"中央", lat:38.9051564, lon:141.5729224},
+  {id:27, name:"BRUNCH",                               area:"中央", lat:38.8875992, lon:141.5550252},
+  {id:28, name:"bakery.cafe.lepo",                     area:"中央", lat:null,        lon:null},
+  {id:29, name:"北かつまぐろ屋 田中前店",              area:"中央", lat:38.8922537, lon:141.5622595, closed:true},
+  {id:30, name:"ボルセッタイシカワ ライブキッチン",    area:"中央", lat:38.9062967, lon:141.5716817},
+  {id:31, name:"マクドナルド イオン気仙沼店",          area:"中央", lat:null,        lon:null},
+  {id:32, name:"ミナトノトウヤ",                       area:"中央", lat:38.905854,  lon:141.5747016},
+  {id:33, name:"宮登",                                 area:"中央", lat:38.8886619, lon:141.5653515},
+  {id:34, name:"焼肉くりこ",                           area:"中央", lat:null,        lon:null},
+  {id:35, name:"焼肉の店 さうす",                      area:"中央", lat:null,        lon:null},
+  {id:36, name:"焼肉ハウス ジャンジャン",              area:"中央", lat:null,        lon:null},
+  {id:37, name:"焼肉冷麺やまなか家 気仙沼店",          area:"中央", lat:null,        lon:null},
+  {id:38, name:"ラーメン炎",                           area:"中央", lat:null,        lon:null},
+  {id:39, name:"リアスキッチン",                       area:"中央", lat:38.8998802, lon:141.5797142},
+  {id:40, name:"旅館 海光館",                          area:"中央", lat:38.8703522, lon:141.5788397},
+  // ── 北エリア（鹿折・大島・唐桑） ──
+  {id:41, name:"家カフェ『HATA』",                    area:"北",   lat:null,        lon:null},
+  {id:42, name:"おおがまテーブル",                     area:"北",   lat:null,        lon:null},
+  {id:43, name:"割烹 焼肉 海鮮ゆう",                  area:"北",   lat:38.8579942, lon:141.6162284},
+  {id:44, name:"Kana Kana",                            area:"北",   lat:null,        lon:null},
+  {id:45, name:"CAFE&MUSIC 十字路",                   area:"北",   lat:null,        lon:null},
+  {id:46, name:"釜揚げうどん 団平",                   area:"北",   lat:null,        lon:null},
+  {id:47, name:"喫茶GIGI",                             area:"北",   lat:null,        lon:null},
+  {id:48, name:"牛角 気仙沼店",                        area:"北",   lat:null,        lon:null},
+  {id:49, name:"島の味処こまつ",                       area:"北",   lat:null,        lon:null},
+  {id:50, name:"食楽まるさん",                         area:"北",   lat:38.885805,  lon:141.6564815},
+  {id:51, name:"茶処プランタン",                       area:"北",   lat:38.9004246, lon:141.6462895},
+  {id:52, name:"TTbase 漁火",                          area:"北",   lat:null,        lon:null},
+  {id:53, name:"麺酒庵こまつ",                         area:"北",   lat:null,        lon:null},
+  {id:54, name:"らいむらいと",                         area:"北",   lat:38.9155244, lon:141.5844192},
+  {id:55, name:"和食 きらず",                          area:"北",   lat:null,        lon:null},
+  // ── 南エリア（階上・本吉） ──
+  {id:56, name:"かぶとむしSurf Shop",                 area:"南",   lat:null,        lon:null},
+  {id:57, name:"鮨処えんどう",                         area:"南",   lat:38.792982,  lon:141.5009756},
+  {id:58, name:"花道",                                 area:"南",   lat:38.8516718, lon:141.5803902},
+  {id:59, name:"陽だまりレストラン",                   area:"南",   lat:null,        lon:null},
+  {id:60, name:"道の駅大谷海岸レストランumicoco",      area:"南",   lat:null,        lon:null},
+  {id:61, name:"南三陸ドライブインひかど食堂",         area:"南",   lat:null,        lon:null},
+  {id:62, name:"めん丸 気仙沼店",                      area:"南",   lat:null,        lon:null},
+  {id:63, name:"モーランド・本吉",                     area:"南",   lat:38.7985981, lon:141.4436973},
+];
+
+// エリア中心座標（Nominatimで座標が取れなかった店舗のフォールバック）
+const AREA_CENTER = { 中央:[38.8990,141.5730], 北:[38.9150,141.5960], 南:[38.8100,141.5020] };
+const AREA_JITTER  = { 中央:0.006, 北:0.010, 南:0.010 };
+
+function resolveCoord(store) {
+  if (store.lat !== null) return [store.lat, store.lon];
+  const [cy,cx] = AREA_CENTER[store.area];
+  const jy = AREA_JITTER[store.area], jx = AREA_JITTER[store.area];
+  return [cy + ((store.id*0.314159)%1)*jy - jy/2,
+          cx + ((store.id*0.271828)%1)*jx - jx/2];
+}
+
+// =============================================================================
+// 地図初期化
+// =============================================================================
+const map = L.map('map').setView([38.905, 141.575], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  maxZoom: 19,
+}).addTo(map);
+
+// マーカーアイコン（SVG）
+function makeIcon(type) {
+  const C = {
+    certified: ['#2e7d32','★',28], approx: ['#f57f17','★',24],
+    closed:    ['#9e9e9e','★',24], osm:    ['#1565c0','●',22],
+    google:    ['#ea4335','G',  24],
+    kanko:     ['#00897b','●',  24],
+  }[type] || ['#1565c0','●',22];
+  const [bg,sym,s] = C;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s+6}">
+    <circle cx="${s/2}" cy="${s/2}" r="${s/2-1}" fill="${bg}" stroke="#fff" stroke-width="2"/>
+    <text x="${s/2}" y="${s/2+5}" text-anchor="middle" font-size="${s*.44}" fill="#fff" font-family="sans-serif">${sym}</text>
+    <line x1="${s/2}" y1="${s-1}" x2="${s/2}" y2="${s+5}" stroke="${bg}" stroke-width="2"/>
+  </svg>`;
+  return L.divIcon({ html:svg, iconSize:[s,s+6], iconAnchor:[s/2,s+6], popupAnchor:[0,-(s+6)], className:'' });
+}
+const ICONS = { certified:makeIcon('certified'), approx:makeIcon('approx'), closed:makeIcon('closed'), osm:makeIcon('osm'), google:makeIcon('google'), kanko:makeIcon('kanko') };
+
+// =============================================================================
+// 店舗データ
+// =============================================================================
+const allStores = [];
+const certifiedNames = new Set(CERTIFIED.map(s=>s.name));
+
+function buildPopup(store) {
+  return `
+    <div class="popup-title">${store.name}</div>
+    ${store.certified ? '<span class="popup-certified">★ けせんぬま子育て応援店</span>' : ''}
+    <div style="font-size:11px;color:#555;margin-top:4px">エリア: ${store.area}エリア</div>
+    ${store.approx ? '<div class="popup-approx">⚠ 位置は推定（エリア中心付近）</div>' : ''}
+    ${store.closed ? '<div style="color:#c00;font-size:11px;margin-top:2px">※ 2026年3月閉店</div>' : ''}
+  `;
+}
+
+// 認証店をallStoresに追加
+for (const s of CERTIFIED) {
+  const [lat,lon] = resolveCoord(s);
+  const approx = s.lat === null;
+  const iconKey = s.closed ? 'closed' : (approx ? 'approx' : 'certified');
+  const marker = L.marker([lat,lon], { icon:ICONS[iconKey] });
+  marker.bindPopup(() => buildPopup(entry), { maxWidth:260 });
+  const entry = { ...s, lat, lon, certified:true, approx, marker };
+  marker.bindPopup(() => buildPopup(entry), { maxWidth:260 });
+  allStores.push(entry);
+}
+
+// =============================================================================
+// Overpass API: OSM の飲食店（非認証店含む）を非同期取得
+// =============================================================================
+const OVERPASS = 'https://overpass-api.de/api/interpreter';
+// 飲食店関連タグを幅広く取得
+const OVERPASS_Q = `[out:json][timeout:30];
+area["name"="気仙沼市"]["admin_level"="7"]->.a;
+(
+  node["amenity"~"^(restaurant|cafe|bar|fast_food|food_court|pub|ice_cream|bakery|canteen)$"](area.a);
+  way ["amenity"~"^(restaurant|cafe|bar|fast_food|food_court|pub|ice_cream|bakery|canteen)$"](area.a);
+  node["shop"~"^(bakery|confectionery|deli|coffee)$"](area.a);
+  way ["shop"~"^(bakery|confectionery|deli|coffee)$"](area.a);
+  node["tourism"="hotel"]["name"](area.a);
+)->.r;
+.r out center;`;
+
+const osmIds = new Set();
+
+(async function loadOSM() {
+  showLoading('OSMデータを取得中...');
+  try {
+    const res = await fetch(OVERPASS, {
+      method:'POST',
+      body:`data=${encodeURIComponent(OVERPASS_Q)}`,
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    });
+    const json = await res.json();
+    for (const el of json.elements) {
+      const name = el.tags?.name;
+      if (!name) continue;
+      if (certifiedNames.has(name)) continue;
+      const lat = el.type==='node' ? el.lat : el.center?.lat;
+      const lon = el.type==='node' ? el.lon : el.center?.lon;
+      if (!lat||!lon) continue;
+      const key = `${el.type}-${el.id}`;
+      if (osmIds.has(key)) continue;
+      osmIds.add(key);
+
+      const amenity = el.tags.amenity || el.tags.shop || el.tags.tourism || '';
+      const marker = L.marker([lat,lon], { icon:ICONS.osm });
+      const entry = { id:key, name, area:guessArea(lat,lon), lat, lon, certified:false, approx:false, closed:false, marker, amenity };
+      marker.bindPopup(`
+        <div class="popup-title">${name}</div>
+        <div style="font-size:11px;color:#555;margin-top:4px">${amenityLabel(amenity)}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:2px">OpenStreetMap</div>
+      `, { maxWidth:220 });
+      allStores.push(entry);
+    }
+  } catch(e) {
+    console.warn('Overpass取得エラー:', e);
+  } finally {
+    hideLoading();
+    renderAll();
+  }
+})();
+
+function amenityLabel(a) {
+  return ({restaurant:'レストラン',cafe:'カフェ',bar:'バー',fast_food:'ファストフード',
+    pub:'パブ',ice_cream:'アイスクリーム',bakery:'ベーカリー',coffee:'カフェ',
+    hotel:'ホテル'})[a] || a;
+}
+function guessArea(lat,lon) {
+  if (lat < 38.86) return '南';
+  if (lon > 141.58) return '北';
+  return '中央';
+}
+
+// =============================================================================
+// 気仙沼観光サイト掲載店 (./restaurants.json)
+// 出典: https://kesennuma-kanko.jp/eat/theme/
+// GitHub Actions の fetch-kanko.yml で定期更新される
+// =============================================================================
+(async function loadKankoRestaurants() {
+  try {
+    const res  = await fetch('./restaurants.json?t=' + Date.now());
+    const json = await res.json();
+    const places = json.places || [];
+    if (places.length === 0) return;
+
+    // 認証店と重複しないよう名前で弾く（kankoデータには認証店も含まれる）
+    const existingNames = new Set(allStores.map(s => s.name));
+    // より広めの一致：認証店名と部分一致するものも除外
+    const certifiedNamesList = [...certifiedNames];
+
+    let added = 0;
+    for (const p of places) {
+      if (!p.lat || !p.lon) continue;
+      if (existingNames.has(p.name)) continue;
+
+      // 認証店との部分一致チェック（例: 「焼肉くりこ」と「気仙沼ホルモン発祥の店 焼肉くりこ」）
+      const isCertifiedDup = certifiedNamesList.some(cn =>
+        p.name.includes(cn) || cn.includes(p.name)
+      );
+      if (isCertifiedDup) continue;
+
+      existingNames.add(p.name);
+      const area   = guessArea(p.lat, p.lon);
+      const marker = L.marker([p.lat, p.lon], { icon: ICONS.kanko });
+
+      marker.bindPopup(`
+        <div class="popup-title">${p.name}</div>
+        ${p.hours  ? `<div style="font-size:11px;color:#444;margin-top:4px">🕐 ${p.hours}</div>`  : ''}
+        ${p.closed ? `<div style="font-size:11px;color:#888;margin-top:2px">定休: ${p.closed}</div>` : ''}
+        <a href="${p.url}" target="_blank" rel="noopener"
+           style="display:inline-block;margin-top:6px;font-size:11px;color:#00897b;font-weight:600;text-decoration:none">
+          🌐 気仙沼観光サイトで詳細を見る
+        </a>
+      `, { maxWidth: 280 });
+
+      allStores.push({
+        id: p.id, name: p.name, area, lat: p.lat, lon: p.lon,
+        certified: false, approx: false, closed: false,
+        marker, source: 'kanko',
+        hours: p.hours, closedDay: p.closed, kankoUrl: p.url,
+      });
+      added++;
+    }
+    if (added > 0) renderAll();
+  } catch(e) {
+    console.info('restaurants.json を読み込めませんでした');
+  }
+})();
+
+
+// =============================================================================
+// フィルタ & 描画
+// =============================================================================
+let filterMode = 'all';
+let activeAreas = new Set(['中央','北','南']);
+let searchText  = '';
+let activeItemId = null;
+
+function isVisible(s) {
+  if (filterMode === 'certified' && !s.certified) return false;
+  if (!activeAreas.has(s.area)) return false;
+  if (searchText && !s.name.toLowerCase().includes(searchText)) return false;
+  return true;
+}
+
+function renderAll() {
+  const listEl = document.getElementById('store-list');
+  const items  = [];
+
+  for (const s of allStores) {
+    if (isVisible(s)) { s.marker.addTo(map); items.push(s); }
+    else              { s.marker.remove(); }
+  }
+
+  items.sort((a,b) => {
+    if (a.certified !== b.certified) return a.certified ? -1 : 1;
+    const ord = {中央:0,北:1,南:2};
+    if (a.area !== b.area) return ord[a.area]-ord[b.area];
+    return a.name.localeCompare(b.name,'ja');
+  });
+
+  listEl.innerHTML = '';
+  const AREA_COLOR = {中央:'#1a6ee0',北:'#2e7d32',南:'#e67e22'};
+
+  for (const s of items) {
+    const div = document.createElement('div');
+    div.className = 'store-item' + (s.id===activeItemId ? ' active' : '');
+    div.dataset.id = s.id;
+
+    const iconSvg = s.certified
+      ? `<svg width="28" height="28"><circle cx="14" cy="14" r="13" fill="${s.closed?'#9e9e9e':(s.approx?'#f57f17':'#2e7d32')}"/><text x="14" y="19" text-anchor="middle" font-size="13" fill="#fff" font-family="sans-serif">★</text></svg>`
+      : s.source === 'kanko'
+        ? `<svg width="28" height="28"><circle cx="14" cy="14" r="13" fill="#00897b"/><text x="14" y="19" text-anchor="middle" font-size="12" fill="#fff" font-family="sans-serif">●</text></svg>`
+        : `<svg width="28" height="28"><circle cx="14" cy="14" r="13" fill="#1565c0"/><text x="14" y="19" text-anchor="middle" font-size="12" fill="#fff" font-family="sans-serif">●</text></svg>`;
+
+    const ac = AREA_COLOR[s.area];
+    div.innerHTML = `
+      <div class="store-icon-wrap">${iconSvg}</div>
+      <div class="store-info">
+        <div class="store-name${s.closed?' closed':''}">${s.name}</div>
+        <div class="store-badges">
+          ${s.certified
+            ? '<span class="badge badge-certified">★ 子育て応援店</span>'
+            : s.source === 'kanko'
+              ? '<span class="badge" style="background:#e0f2f1;color:#00695c">🌐 観光サイト</span>'
+              : '<span class="badge badge-osm">OSM</span>'}
+          <span class="badge" style="background:${ac}22;color:${ac}">${s.area}エリア</span>
+          ${s.approx ? '<span class="badge badge-approx">推定位置</span>' : ''}
+          ${s.closed ? '<span class="badge badge-closed">閉店</span>' : ''}
+          ${s.closedDay ? `<span class="badge" style="background:#f5f5f5;color:#666;font-weight:400">${s.closedDay}休</span>` : ''}
+        </div>
+      </div>
+    `;
+    div.addEventListener('click', () => selectStore(s));
+    listEl.appendChild(div);
+  }
+
+  const cCert  = items.filter(s=>s.certified).length;
+  const cTotal = items.length;
+  document.getElementById('list-header').textContent =
+    `${cTotal}件表示 (子育て応援店: ${cCert}件)`;
+  document.getElementById('count-badge').textContent = `${cTotal}件`;
+}
+
+function selectStore(store) {
+  activeItemId = store.id;
+  map.setView([store.lat,store.lon], 16, {animate:true});
+  store.marker.openPopup();
+  renderAll();
+  const el = document.querySelector(`.store-item[data-id="${CSS.escape(String(store.id))}"]`);
+  if (el) el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// =============================================================================
+// UI イベント
+// =============================================================================
+document.getElementById('search').addEventListener('input', e => {
+  searchText = e.target.value.trim().toLowerCase();
+  renderAll();
+});
+
+document.querySelectorAll('[data-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    filterMode = btn.dataset.filter;
+    renderAll();
+  });
+});
+
+document.querySelectorAll('[data-area]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const area = btn.dataset.area;
+    if (activeAreas.has(area)) {
+      if (activeAreas.size > 1) { activeAreas.delete(area); btn.classList.remove('active'); }
+    } else {
+      activeAreas.add(area); btn.classList.add('active');
+    }
+    renderAll();
+  });
+});
+
+// =============================================================================
+// ローディング
+// =============================================================================
+function showLoading(msg) { const e=document.getElementById('loading-overlay'); e.textContent=msg; e.style.display='block'; }
+function hideLoading()    { document.getElementById('loading-overlay').style.display='none'; }
+
+// =============================================================================
+// 初回描画
+// =============================================================================
+renderAll();
+</script>
 </body>
 </html>
